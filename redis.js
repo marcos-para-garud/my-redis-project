@@ -144,6 +144,179 @@ class RedisClone{
         this.store.get(key).push(value); // Add to end
         return this.store.get(key).length;
       }
+
+
+      // remaing time for expiry
+
+      ttl(key)
+      {
+        if(!this.expiry.has(key)) return -1;
+        if(!this.store.has(key)) return -2;
+
+        const timeLeft = Math.ceil((this.expiry.get(key) - Date.now())/1000);
+        return timeLeft > 0 ? timeLeft : -2;
+      }
+
+
+      // rename a key
+      rename(oldKey, newKey) {
+        if (!this.store.has(oldKey)) throw new Error("No such key");
+      
+        const value = this.store.get(oldKey);
+        this.store.set(newKey, value);
+        this.delete(oldKey); // Remove old key
+      
+        return "OK";
+      }
+    
+      
+      // adding to left and right
+
+      lpush(key, value) {
+        if (!this.store.has(key)) {
+          this.store.set(key, []);
+        } else if (!Array.isArray(this.store.get(key))) {
+          throw new Error("Key is not a list");
+        }
+      
+        this.store.get(key).unshift(value); // Add to front
+        return this.store.get(key).length;
+      }
+      
+      rpush(key, value) {
+        if (!this.store.has(key)) {
+          this.store.set(key, []);
+        } else if (!Array.isArray(this.store.get(key))) {
+          throw new Error("Key is not a list");
+        }
+      
+        this.store.get(key).push(value); // Add to end
+        return this.store.get(key).length;
+      }
+
+
+      // removing from left and right
+
+      lpop(key) {
+        if (!this.store.has(key) || !Array.isArray(this.store.get(key)) || this.store.get(key).length === 0) {
+          return "(nil)";
+        }
+      
+        return this.store.get(key).shift(); // Remove first element
+      }
+        
+      rpop(key) {
+        if (!this.store.has(key) || !Array.isArray(this.store.get(key)) || this.store.get(key).length === 0) {
+          return "(nil)";
+        }
+      
+        return this.store.get(key).pop(); // Remove last element
+      }
+        
+      
+      // setting hash set
+
+      hset(key , field , value)
+      {
+        if(!this.store.has(key))
+        {
+             this.store.set(key , {})
+        }
+        else if (typeof this.store.get(key) !== "object" || Array.isArray(this.store.get(key))) {
+            throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          }
+          this.store.get(key)[field] = value;
+          return 1;
+      }
+
+
+      // get a field value from the hash
+
+      hget(key , field)
+      {
+        if(!this.store.has(key))
+        { 
+            return "(nil)";
+
+        }
+           
+
+        else if (typeof this.store.get(key) !== "object" || Array.isArray(this.store.get(key))) {
+            throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          }
+          return this.store.get(key)[field]!== undefined ? this.store.get(key)[field] : "(nil)";     
+         }
+      
+
+         // hash field deletion
+
+         hdel(key , field)
+         {
+            if(!this.store.has(key))
+            {
+                return 0;
+            }
+            else if (typeof this.store.get(key) !== "object" || Array.isArray(this.store.get(key))) {
+                throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+              }
+              const hash = this.store.get(key);
+              if(hash[field] !== undefined)
+              {
+                delete hash[field];
+                return 1;
+              }
+              return 0;
+         }
+
+
+         // get all fields and values from a key
+
+
+         hgetall(key) {
+            if (!this.store.has(key)) {
+              return {}; // Return an empty object if the key doesn't exist
+            } else if (typeof this.store.get(key) !== "object" || Array.isArray(this.store.get(key))) {
+              throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+            }
+          
+            return this.store.get(key); // Return all fields and values
+          }
+
+
+
+          // increment a hash field
+
+          hincrby(key , field , increment)
+          {
+            if(!this.store.has(key))
+            {
+                this.store.set(key, {});
+            }
+            else if (typeof this.store.get(key) !== "object" || Array.isArray(this.store.get(key))) {
+                throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+              }
+
+              const hash = this.store.get(key);
+
+              if(!(field in hash))
+              {
+                hash[field] = increment;
+              }
+              else if (typeof hash[field] !== "number") {
+                throw new Error("ERR hash value is not an integer");
+              }
+              else{
+                hash[field]+=increment;
+              }
+
+              return hash[field];
+          }
+
+
+          // set a time to live ttl
+
+
+          
       
 }
 module.exports = new RedisClone();
