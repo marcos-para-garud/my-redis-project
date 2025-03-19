@@ -1,7 +1,60 @@
+const fs = require("fs");
+const path = require("path");
+
 class RedisClone{
     constructor(){
         this.store = new Map();
         this.expiry = new Map();
+        this.filePath = path.join(__dirname , "data.json");
+        this.loadFromFile();
+         this.autoSaveInterval = 30000; // Auto-save every 30 seconds (adjust as needed)
+         this.scheduleAutoSave();
+    }
+
+
+    // save data to file
+    saveToFile(){
+        try {
+            const data = {
+                store: Array.from(this.store.entries()),
+                expiry: Array.from(this.expiry.entries()),
+            };
+            fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2));
+        } catch (error) {
+            console.error("Error saving RDB file:", error);
+        }
+    }
+
+    // load data from file
+
+    loadFromFile() {
+        if (fs.existsSync(this.filePath)) {
+            try {
+                const data = JSON.parse(fs.readFileSync(this.filePath, "utf-8"));
+
+                this.store = new Map(data.store);
+                this.expiry = new Map(data.expiry);
+
+                // Restart expiration timers
+                this.expiry.forEach((expireAt, key) => {
+                    const timeLeft = expireAt - Date.now();
+                    if (timeLeft > 0) {
+                        setTimeout(() => this.delete(key), timeLeft);
+                    } else {
+                        this.delete(key);
+                    }
+                });
+            } catch (error) {
+                console.error("Error loading RDB file:", error);
+            }
+        }
+    }
+
+
+    scheduleAutoSave() {
+        setInterval(() => {
+            this.saveToFile();
+        }, this.autoSaveInterval);
     }
 
     set(key,value,ttl=null)
@@ -18,6 +71,7 @@ class RedisClone{
             this.expiry.set(key, expireAt);
             setTimeout(() => this.delete(key), ttl * 1000); // Auto-delete key when TTL expires
           }
+          this.saveToFile(); 
         return "OK";
     }
 
@@ -35,6 +89,7 @@ class RedisClone{
     {
         const deleted = this.store.delete(key);
         this.expiry.delete(key); // Remove expiry time if key is deleted
+        this.saveToFile(); 
         return deleted ? "1" : "0";
     }
 
@@ -42,6 +97,7 @@ class RedisClone{
     {
         this.store.clear();
         this.expiry.clear();
+        this.saveToFile(); 
         return "Flushed"
     }
 
@@ -65,7 +121,7 @@ class RedisClone{
         setTimeout(() => {
             this.delete(key)
         }, ttl*1000);
-
+        this.saveToFile();
         return 1;
     }
 
@@ -86,7 +142,7 @@ class RedisClone{
 
         value = Number(value) + 1;
         this.store.set(key, value);
-  
+        this.saveToFile();
         return value;
       }
 
@@ -101,10 +157,12 @@ class RedisClone{
       
         value = Number(value) - 1;
         this.store.set(key, value);
-      
+        this.saveToFile();
         return value;
       }
 
+
+      // remaining time for expiry
       ttl(key) {
         if (!this.store.has(key)) return -2; // -2 if key doesn't exist
         if (!this.expiry.has(key)) return -1; // -1 if key has no expiration
@@ -119,7 +177,7 @@ class RedisClone{
         const value = this.store.get(oldKey);
         this.store.set(newKey, value);
         this.delete(oldKey); // Remove old key
-      
+        this.saveToFile();
         return "OK";
       }
     
@@ -131,6 +189,7 @@ class RedisClone{
         }
       
         this.store.get(key).unshift(value); // Add to front
+        this.saveToFile();
         return this.store.get(key).length;
       }
       
@@ -142,33 +201,15 @@ class RedisClone{
         }
       
         this.store.get(key).push(value); // Add to end
+        this.saveToFile();
         return this.store.get(key).length;
       }
 
 
-      // remaing time for expiry
-
-      ttl(key)
-      {
-        if(!this.expiry.has(key)) return -1;
-        if(!this.store.has(key)) return -2;
-
-        const timeLeft = Math.ceil((this.expiry.get(key) - Date.now())/1000);
-        return timeLeft > 0 ? timeLeft : -2;
-      }
+     
 
 
-      // rename a key
-      rename(oldKey, newKey) {
-        if (!this.store.has(oldKey)) throw new Error("No such key");
-      
-        const value = this.store.get(oldKey);
-        this.store.set(newKey, value);
-        this.delete(oldKey); // Remove old key
-      
-        return "OK";
-      }
-    
+     
       
       // adding to left and right
 
@@ -180,6 +221,7 @@ class RedisClone{
         }
       
         this.store.get(key).unshift(value); // Add to front
+        this.saveToFile();
         return this.store.get(key).length;
       }
       
@@ -191,6 +233,7 @@ class RedisClone{
         }
       
         this.store.get(key).push(value); // Add to end
+        this.saveToFile();
         return this.store.get(key).length;
       }
 
@@ -201,7 +244,7 @@ class RedisClone{
         if (!this.store.has(key) || !Array.isArray(this.store.get(key)) || this.store.get(key).length === 0) {
           return "(nil)";
         }
-      
+        this.saveToFile();
         return this.store.get(key).shift(); // Remove first element
       }
         
@@ -209,7 +252,7 @@ class RedisClone{
         if (!this.store.has(key) || !Array.isArray(this.store.get(key)) || this.store.get(key).length === 0) {
           return "(nil)";
         }
-      
+        this.saveToFile();
         return this.store.get(key).pop(); // Remove last element
       }
         
@@ -226,6 +269,7 @@ class RedisClone{
             throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
           }
           this.store.get(key)[field] = value;
+          this.saveToFile();
           return 1;
       }
 
@@ -263,6 +307,7 @@ class RedisClone{
               if(hash[field] !== undefined)
               {
                 delete hash[field];
+                this.saveToFile();
                 return 1;
               }
               return 0;
@@ -308,7 +353,7 @@ class RedisClone{
               else{
                 hash[field]+=increment;
               }
-
+              this.saveToFile();
               return hash[field];
           }
 
@@ -316,7 +361,7 @@ class RedisClone{
           // set a time to live ttl
 
 
-          
+
       
 }
-module.exports = new RedisClone();
+module.exports =  RedisClone;

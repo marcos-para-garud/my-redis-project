@@ -1,17 +1,48 @@
-const redis = require("./redis")
+const net = require("net")
 
-console.log(redis);
-console.log(redis.set("Name" , "Akash"));
-console.log(redis.set("age" , 27));
+const RedisClone = require("./redis");
 
-console.log(redis.store);
+const redis = new RedisClone();
 
-console.log(redis.get("Name"));
-console.log(redis.get("age"));
-console.log(redis.get("city"));
+const server = net.createServer((socket)=>{
+    console.log("client is connected");
 
-console.log(redis.delete("age"));
+    socket.on("data" , (data)=>{
+        const command = data.toString().trim().split(" ");
+        const action = command[0].toUpperCase();
 
+        let response;
+
+        switch (action) {
+            case "SET":
+                response = redis.set(command[1], command[2], Number(command[3] || null));
+                break;
+            case "GET":
+                response = redis.get(command[1]);
+                break;
+            case "DELETE":
+                response = redis.delete(command[1]);
+                break;
+            default:
+                response = "ERROR: Unknown command";
+        }
+
+        socket.write(response + "\n")
+
+    })
+
+    socket.on("end" , ()=>{
+        console.log("Client disconnected");
+    })
+    
+})
+
+const port = 6379;
+
+server.listen(port , ()=>{
+    console.log("Server is connected to 6379");
+    
+})
 
 
 
