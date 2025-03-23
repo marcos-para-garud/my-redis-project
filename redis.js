@@ -2,13 +2,14 @@ const fs = require("fs");
 const path = require("path");
 
 class RedisClone{
-    constructor(){
+    constructor(maxSize = 100){
         this.store = new Map();
         this.expiry = new Map();
         this.filePath = path.join(__dirname , "data.json");
         this.loadFromFile();
          this.autoSaveInterval = 30000; // Auto-save every 30 seconds (adjust as needed)
          this.scheduleAutoSave();
+         this.maxSize = maxSize;
     }
 
 
@@ -57,15 +58,40 @@ class RedisClone{
         }, this.autoSaveInterval);
     }
 
+
+    /*** LRU Mechanism: Move item to end when accessed ***/
+    _updateLRU(key){
+      if(this.store.has(key))
+      {
+        const value = this.store.get(key);
+        this.store.delete(key);
+        this.store.set(key , value);
+      }
+    }
+
+     /*** LRU Eviction: Remove least recently used item if needed ***/
+     _evictLRU() {
+      if(this.store.size > this.maxSize)
+      {
+        const oldestKey = this.store.keys().next().value;
+        this.delete(oldestKey);
+      }
+     }
+
     set(key,value,ttl=null)
     {
-        this.store.set(key , value);
+       // this.store.set(key , value);
         // if(ttl)
         // {
         //     const expireAt = Date.now() + ttl*1000;
         //     this.expiry.set(key , expireAt);
         //     setTimeout(()=>this.store.delete(key) , expireAt)
         // }
+        if (this.store.has(key)) {
+          this.store.delete(key); // Remove old instance to update LRU order
+      }
+      this.store.set(key, value);
+      this._evictLRU(); // Ensure maxSize limit
         if (ttl) {
             const expireAt = Date.now() + ttl * 1000; // Convert seconds to milliseconds
             this.expiry.set(key, expireAt);
@@ -77,12 +103,22 @@ class RedisClone{
 
     get(key)
     {
-        if(this.expiry.has(key) && Date.now()>=this.expiry.get(key))
-        {
-            this.delete(key);
-            return "(nil)";
-        }
-        return this.store.has(key)? this.store.get(key):null;
+        // if(this.expiry.has(key) && Date.now()>=this.expiry.get(key))
+        // {
+        //     this.delete(key);
+        //     return "(nil)";
+        // }
+        // return this.store.has(key)? this.store.get(key):null;
+
+        if (this.expiry.has(key) && Date.now() >= this.expiry.get(key)) {
+          this.delete(key);
+          return "(nil)";
+      }
+      if (this.store.has(key)) {
+          this._updateLRU(key); // Mark as recently used
+          return this.store.get(key);
+      }
+      return null;
     }
 
     delete(key)
