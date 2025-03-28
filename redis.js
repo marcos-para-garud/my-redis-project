@@ -1,5 +1,7 @@
 const fs = require("fs");
 const path = require("path");
+const {Worker} = require("worker_threads");
+const {fork} = require("child_process");
 
 class RedisClone{
     constructor(maxSize = 100){
@@ -10,8 +12,54 @@ class RedisClone{
          this.autoSaveInterval = 30000; // Auto-save every 30 seconds (adjust as needed)
          this.scheduleAutoSave();
          this.maxSize = maxSize;
+         this.channels = new Map();
+
+         this.ttlWorker = new Worker(path.join(__dirname, "ttlWorker.js"));
+         this.ttlWorker.on("message", (message) => {
+             if (message.type === "delete") {
+                 this.delete(message.key, false);
+             }
+         });
+
+         this.rdbWorker = fork(path.join(__dirname, "rdbWorker.js"));
     }
 
+    // Publish a message to channel
+
+    publish(channel , message)
+    {
+      if(!this.channels.has(channel)) return 0;
+
+      const subscribers = this.channels.get(channel);
+      subscribers.forEach((callback) => {
+        callback(message);
+    });
+
+    return subscribers.length; // Return the number of subscribers notified
+    }
+
+
+    // subscribe to a channel
+    subscribe(channel , callback)
+    {
+      if (!this.channels.has(channel)) {
+        this.channels.set(channel, new Set());
+    }
+    this.channels.get(channel).add(callback);
+    }
+
+
+    // unsubscribe to a channel
+
+    unsubscribe(channel, callback) {
+        if(this.channels.has(channel))
+        {
+          this.channels.get(channel).delete(callback);
+          if (this.channels.get(channel).size === 0) {
+            this.channels.delete(channel);
+        }
+        }
+    }
 
     // save data to file
     saveToFile(){
@@ -20,8 +68,9 @@ class RedisClone{
                 store: Array.from(this.store.entries()),
                 expiry: Array.from(this.expiry.entries()),
             };
-            fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2));
-        } catch (error) {
+           // fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2));
+           this.rdbWorker.send(data);
+          } catch (error) {
             console.error("Error saving RDB file:", error);
         }
     }
@@ -40,7 +89,8 @@ class RedisClone{
                 this.expiry.forEach((expireAt, key) => {
                     const timeLeft = expireAt - Date.now();
                     if (timeLeft > 0) {
-                        setTimeout(() => this.delete(key), timeLeft);
+                       // setTimeout(() => this.delete(key), timeLeft);
+                       this.ttlWorker.postMessage({ type: "setTTL", key, ttl: timeLeft / 1000 });
                     } else {
                         this.delete(key);
                     }
@@ -92,11 +142,14 @@ class RedisClone{
       }
       this.store.set(key, value);
       this._evictLRU(); // Ensure maxSize limit
+        // if (ttl) {
+        //     const expireAt = Date.now() + ttl * 1000; // Convert seconds to milliseconds
+        //     this.expiry.set(key, expireAt);
+        //     setTimeout(() => this.delete(key), ttl * 1000); // Auto-delete key when TTL expires
+        //   }
         if (ttl) {
-            const expireAt = Date.now() + ttl * 1000; // Convert seconds to milliseconds
-            this.expiry.set(key, expireAt);
-            setTimeout(() => this.delete(key), ttl * 1000); // Auto-delete key when TTL expires
-          }
+          this.ttlWorker.postMessage({ type: "setTTL", key, ttl });
+      }
           this.saveToFile(); 
         return "OK";
     }
@@ -121,13 +174,23 @@ class RedisClone{
       return null;
     }
 
-    delete(key)
-    {
-        const deleted = this.store.delete(key);
-        this.expiry.delete(key); // Remove expiry time if key is deleted
-        this.saveToFile(); 
-        return deleted ? "1" : "0";
-    }
+    // delete(key)
+    // {
+    //     const deleted = this.store.delete(key);
+    //     this.expiry.delete(key); // Remove expiry time if key is deleted
+    //     this.saveToFile(); 
+    //     return deleted ? "1" : "0";
+    // }
+
+    delete(key, notifyWorker = true) {
+      const deleted = this.store.delete(key);
+      this.expiry.delete(key);
+      if (notifyWorker) {
+          this.ttlWorker.postMessage({ type: "delete", key });
+      }
+      this.saveToFile();
+      return deleted ? "1" : "0";
+  }
 
     flushAll()
     {

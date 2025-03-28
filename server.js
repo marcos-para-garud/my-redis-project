@@ -23,6 +23,23 @@ const server = net.createServer((socket)=>{
             case "DELETE":
                 response = redis.delete(command[1]);
                 break;
+                case "PUBLISH":
+                    response = redis.publish(command[1], command.slice(2).join(" "));
+                    socket.write(`Published to ${response} subscribers\n`);
+                    break;
+                case "SUBSCRIBE":
+                    redis.subscribe(command[1], (message) => {
+                        socket.write(`Message from ${command[1]}: ${message}\n`);
+                    });
+                    socket.write(`Subscribed to ${command[1]}\n`);
+                    break;
+                case "UNSUBSCRIBE":
+                    redis.unsubscribe(command[1], (message) => {
+                        socket.write(`Unsubscribed from ${command[1]}\n`);
+                    });
+                    socket.write(`Unsubscribed from ${command[1]}\n`);
+                    break;
+                
             default:
                 response = "ERROR: Unknown command";
         }
