@@ -5,6 +5,9 @@ const {fork} = require("child_process");
 
 class RedisClone{
     constructor(maxSize = 100){
+
+        this.slaves = [];
+
         this.store = new Map();
         this.expiry = new Map();
         this.filePath = path.join(__dirname , "data.json");
@@ -22,6 +25,26 @@ class RedisClone{
          });
 
          this.rdbWorker = fork(path.join(__dirname, "rdbWorker.js"));
+    }
+
+
+    // register slave
+
+    registerSlave(slaveSocket)
+    {
+      this.slaves.push(slaveSocket);
+      console.log("new slave has been registered");
+      
+    }
+
+    //to send updates to slaves
+
+    replicate(command , args)
+    {
+      const payload = JSON.stringify({ command, args });
+      this.slaves.forEach((socket)=>{
+        socket.write(payload + "\n");
+      })
     }
 
     // Publish a message to channel
@@ -151,6 +174,7 @@ class RedisClone{
           this.ttlWorker.postMessage({ type: "setTTL", key, ttl });
       }
           this.saveToFile(); 
+          this.replicate("set", [key, value, ttl]);
         return "OK";
     }
 
@@ -188,6 +212,7 @@ class RedisClone{
       if (notifyWorker) {
           this.ttlWorker.postMessage({ type: "delete", key });
       }
+      this.replicate("delete", [key]);
       this.saveToFile();
       return deleted ? "1" : "0";
   }
@@ -279,36 +304,6 @@ class RedisClone{
         this.saveToFile();
         return "OK";
       }
-    
-      lpush(key, value) {
-        if (!this.store.has(key)) {
-          this.store.set(key, []);
-        } else if (!Array.isArray(this.store.get(key))) {
-          throw new Error("Key is not a list");
-        }
-      
-        this.store.get(key).unshift(value); // Add to front
-        this.saveToFile();
-        return this.store.get(key).length;
-      }
-      
-      rpush(key, value) {
-        if (!this.store.has(key)) {
-          this.store.set(key, []);
-        } else if (!Array.isArray(this.store.get(key))) {
-          throw new Error("Key is not a list");
-        }
-      
-        this.store.get(key).push(value); // Add to end
-        this.saveToFile();
-        return this.store.get(key).length;
-      }
-
-
-     
-
-
-     
       
       // adding to left and right
 
@@ -321,6 +316,7 @@ class RedisClone{
       
         this.store.get(key).unshift(value); // Add to front
         this.saveToFile();
+        this.replicate("lpush", [key, value]);
         return this.store.get(key).length;
       }
       
@@ -333,6 +329,7 @@ class RedisClone{
       
         this.store.get(key).push(value); // Add to end
         this.saveToFile();
+        this.replicate("rpush", [key, value]);
         return this.store.get(key).length;
       }
 
@@ -369,6 +366,7 @@ class RedisClone{
           }
           this.store.get(key)[field] = value;
           this.saveToFile();
+          this.replicate("hset", [key, field, value]);
           return 1;
       }
 
